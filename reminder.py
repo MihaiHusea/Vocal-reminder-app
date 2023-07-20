@@ -1,8 +1,7 @@
 import os
-import time
 from tkinter import *
 from datetime import datetime
-from tkinter.ttk import Combobox
+from tkinter.ttk import Combobox, Treeview, Style
 from gtts import gTTS
 from playsound import playsound
 import messagebox
@@ -19,6 +18,8 @@ class Reminder:
         self.window.resizable(False, False)
         self.window.geometry("+1500+30")
         self.window.config(bg="#8FB9A8")
+        self.style = Style(self.window)
+
         self.set_reminder_button = Button(self.window,
                                           text='Setare memento',
                                           command=self.set_reminder_data,
@@ -27,9 +28,20 @@ class Reminder:
                                           fg="white",
                                           font=('Arial', 12, 'bold'))
         self.set_reminder_button.grid(column=0, row=5, columnspan=3, padx=10, pady=10)
+
+        self.delete_reminder_button = Button(self.window,
+                                             text='Sterge memento',
+                                             command=self.delete_selected_reminder,
+                                             highlightthickness=0,
+                                             bg="#CC2A49",
+                                             fg="white",
+                                             font=('Arial', 12, 'bold'))
+        self.delete_reminder_button.grid(column=0, row=7, columnspan=3, padx=10, pady=10)
+
         self.reminder_text = Entry(self.window,
                                    width=40,
                                    font=('Italic', 15), fg="grey")
+
         self.reminder_text.insert(0, "Introduceti memento aici...")
         self.reminder_text.bind("<FocusIn>", self.clear_reminder_input)
         self.reminder_text.grid(column=0, row=4, columnspan=3, padx=10, pady=10)
@@ -53,6 +65,7 @@ class Reminder:
         self.select_day_dropdown()
         self.select_month_dropdown()
         self.select_years_dropdown()
+        self.table()
 
     def select_hour_dropdown(self):
         global hours_menu, hours_dropdown, current_hour_value
@@ -80,9 +93,9 @@ class Reminder:
         days_menu.set(current_day)
         days_dropdown = Combobox(self.window, textvariable=days_menu, values=self.days, width=3)
         days_dropdown.grid(column=2, row=1, pady=5, )
-        set_time_label = Label(self.window, text="Selectati data:", bg="#8FB9A8", fg="#2d807a",
+        set_date_label = Label(self.window, text="Selectati data:", bg="#8FB9A8", fg="#2d807a",
                                font=('Arial', 12, 'bold'))
-        set_time_label.place(x=270, y=213)
+        set_date_label.place(x=300, y=218)
 
     def select_month_dropdown(self):
         global months_menu, months_dropdown
@@ -101,7 +114,7 @@ class Reminder:
         years_dropdown.grid(column=2, row=3, pady=5, )
 
     def clear_reminder_input(self, _event):
-        if self.reminder_text.get() == "Introduceti memento aici...":
+        if self.reminder_text.get():
             self.reminder_text.delete(0, END)
 
     def clock(self):
@@ -129,7 +142,7 @@ class Reminder:
         # set clock to update to 1 second
         hour_and_date_label.after(1000, self.clock)
         # reminder update to 1 seconds
-        self.window.after(1000, self.reminder)
+        self.window.after(1000, self.execute_reminder)
 
     def set_reminder_data(self):
         global hours_dropdown, minutes_dropdown, days_dropdown, months_dropdown, years_dropdown
@@ -167,20 +180,20 @@ class Reminder:
             hours_menu.set(f"{current_hour_value}")
             minutes_menu.set(f"{current_minute_value}")
             messagebox.showinfo(title="New reminder",
-                                message=f"Un reminder nou a fost setat")
+                                message="Un reminder nou a fost setat")
+            self.window.after(1000, self.table)
 
-    def reminder(self):
-        global hour_now
+    def execute_reminder(self):
+        global hour_now, selected_data
         with open("data.json", "r") as file:
             # Reading data
             data = json.load(file)
-        for remind in data.items():
+        for remind in data.copy().items():
             if remind[1]["date"] == date_in_romanian:
                 if remind[1]["hour"] == hour_now[0:5] and hour_now[6:] == "00":
-                    for _ in range(3):
-                        self.voice_message(text=remind[0])
-                        time.sleep(1)
+                    self.voice_message(text=remind[0])
                     messagebox.showinfo("Reminder", f"{remind[0]}")
+                    self.delete_reminder_after_run(reminder=remind[0], data=data)
 
     @staticmethod
     def voice_message(text):
@@ -192,6 +205,80 @@ class Reminder:
 
         else:
             print("Error: No text to speak")
+
+    def table(self):
+        # Create a Treeview widget
+        global tree
+        tree = Treeview(self.window)
+        self.style.theme_use("clam")
+        self.style.configure("Treeview", background="#8FB9A8",
+                             fieldbackground="#8FB9A8", foreground="black", font=('Modern', 10, 'bold'))
+        tree["height"] = 10
+        scrollbar = Scrollbar(self.window, orient="vertical", command=tree.yview)
+        # Configure the Treeview to use the scrollbar
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        table_items = ("Memento", "Data", "Ora")
+
+        # Define columns
+        tree["columns"] = table_items
+
+        # Format columns
+        tree.column("#0", width=0, stretch=NO)
+        tree.heading("#0", text="", anchor=W)
+        for item in table_items:
+            tree.column(item, anchor=CENTER, width=200)
+            tree.heading(item, text=item, anchor=CENTER)
+
+        # Insert data
+        with open("data.json") as file:
+            data = json.load(file)
+            for remind in data.items():
+                text = remind[0]
+                date = remind[1]["date"]
+                hour = remind[1]["hour"]
+                tree.insert(parent="", index="end", values=(text, date, hour))
+
+        # Pack the Treeview widget
+        tree.grid(row=6, columnspan=3)
+        scrollbar.grid(row=6, column=3, sticky="ns", )
+        tree.bind("<<TreeviewSelect>>", self.select_reminder_from_table)
+
+    @staticmethod
+    def select_reminder_from_table(_event):
+        global selected_data
+        selected_item = tree.focus()
+        if selected_item:
+            selected_data = tree.item(selected_item, "values")
+        else:
+            with open("data.json", "r") as file:
+                # Reading data
+                data = json.load(file)
+                last_reminder = data.popitem()
+                last_reminder_text = last_reminder[0]
+                selected_data = last_reminder_text
+
+    def delete_selected_reminder(self):
+        global selected_data
+        with open("data.json", "r") as file:
+            # Reading data
+            data = json.load(file)
+            for remind in data.copy():
+                # used .copy() method to avoid to modify the size of a
+                # dictionary during iteration and raise a RuntimeError
+                if remind == selected_data[0]:
+                    del data[remind]
+                    with open("data.json", 'w') as new_file:
+                        json.dump(data, new_file, indent=4)
+                        self.window.after(1000, self.table)
+                    messagebox.showinfo("", "Memento selectat a fost sters")
+
+    def delete_reminder_after_run(self, reminder, data):
+        del data[reminder]
+        with open("data.json", 'w') as new_file:
+            json.dump(data, new_file, indent=4)
+            self.window.after(1000, self.table)
+        messagebox.showinfo("", "Memento  va fi sters automat")
 
 
 root = Tk()
